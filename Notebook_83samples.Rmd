@@ -1,0 +1,537 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
+
+Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Ctrl+Shift+Enter*. 
+
+```{r}
+library(readr)
+library(readxl)
+library(pheatmap)
+library(RColorBrewer)
+library(limma)
+library(XML)
+library(genefilter)
+library(cowplot)
+library(vsn)
+library(preprocessCore)
+library(Rcpp)
+library(rje)
+library(xlsx)
+library(geneplotter)
+library(tidyverse)
+library(ggbeeswarm)
+library(tsne)
+
+if (!require("devtools")) {
+  install.packages("devtools", dependencies = TRUE)
+  library(devtools)
+}
+install_github("raivokolde/pheatmap")
+```
+
+First step: load the data (Peptides table)
+```{r}
+
+peptides_83 <- read_delim("/mnt/Data/Anders_group/u/annika/83samples/20180611_EPNfull_Annika_peptides.txt", "\t", escape_double = FALSE, trim_ws = TRUE)
+peptides_83 <- rownames_to_column( peptides_83 )
+peptides_83[1:10,1:20]
+
+```
+
+Prepare the data for working with it (83 samples)
+```{r}
+
+pept83_corr_backup <- peptides_83  %>%
+  dplyr::select( starts_with("Intensity") ) %>%
+  dplyr::select( -contains("Library") ) %>%
+  rename_all( str_replace, "Intensity ", "" )  %>%
+  rename_all( str_replace, "_QE1_TM_fullEPN", "" )  %>%
+  rename_all( str_replace, "70915_QE1_TM_EPN_", "" )  %>%
+  rename_all( str_replace, "_1_", "_" ) %>%
+  rename_all( str_replace, "80416_", "" )  %>%  
+  rename_all( str_replace, "80413_", "" ) %>%
+  dplyr::select( -contains("Intensity") ) 
+pept83_corr_backup[pept83_corr_backup==0]=NA
+pept83_corr_backup=as.matrix( pept83_corr_backup )
+
+pept83_corr <- log2( pept83_corr_backup[ rowSums( is.na( pept83_corr_backup ) )!=ncol( pept83_corr_backup ), ] )
+
+pept83_corr2 <- pept83_corr_backup[ rowSums( is.na( pept83_corr_backup ) )!=ncol( pept83_corr_backup ), ] 
+```
+
+tumor groups and associated samples
+```{r}
+pfa = c( "7EP34", "4EP29", "9EP29", "4EP5", "7EP18", "3EP15", "3EP18", "3EP22", "3EP9", "3EP26", "3EP55", "3EP73", "3EP74", "4EP24", "9EP9", "9EP1", "9EP33", "7EP3", "7EP4", "7EP11", "11EP32", "7EP32", "7EP48", "7EP26" )
+relpos = c( "4EP49", "3EP19", "4EP48", "3EP30", "4EP54", "7EP35", "4EP51", "3EP50", "3EP28", "3EP8", "9EP13", "4EP47", "3EP11", "3EP54", "3EP67", "3EP72", "4EP53", "4EP44", "7EP1", "7EP9" )
+pfb = c( "3EP2", "3EP7", "3EP49", "4EP3", "4EP26", "4EP32", "4EP35", "9EP30", "7EP5", "7EP49", "7EP15", "7EP22")
+mpe = c( "13EP1", "13EP2", "13EP3", "5EP21", "13EP4", "13EP5", "13EP6" )
+pfse = c( "7EP19", "11EP7", "13EP8", "13EP9", "13EP12", "13EP14", "13EP18" )
+spine = c( "NCH439A", "NCH678N", "NCH752I", "NCH1594", "NCH4384" )
+spinese = c( "13EP13", "NCH2838", "NCH4121" )
+stse = c( "3EP3", "3EP46", "3EP75", "13EP10", "13EP11" )
+```
+
+
+Create model frame (17 samples)
+```{r}
+mf_83 <- as.tibble( colnames( pept83_corr_backup ) ) %>%
+  rename( tag = value ) %>%
+  mutate( replicate = ifelse( str_detect( tag, "R2"), "2", "1" ) ) %>%
+  mutate( processing = ifelse( str_detect( tag, "T2"), "old", "new" ) ) %>%
+  mutate( techn_repl = ifelse( str_detect( tag, "R1-2"), "yes", "no" ) ) %>%
+  mutate( sample = str_remove( tag, "R2_" ) ) %>%
+  mutate( sample = str_remove( sample, "_T2" ) ) %>%
+  mutate( sample = str_remove( sample, "old_" ) ) %>%
+  mutate( sample = str_remove( sample, "R1-2_" ) ) %>%
+  mutate( tumor = ifelse( sample%in%relpos, "relpos", "0" ) ) %>%
+  mutate( tumor = ifelse( sample%in%pfa, "pfa", tumor ) ) %>%
+  mutate( tumor = ifelse( sample%in%pfb, "pfb", tumor ) ) %>%
+  mutate( tumor = ifelse( sample%in%mpe, "mpe", tumor ) ) %>%
+  mutate( tumor = ifelse( sample%in%pfse, "pfse", tumor ) ) %>%
+  mutate( tumor = ifelse( sample%in%spine, "spine", tumor ) ) %>%
+  mutate( tumor = ifelse( sample%in%spinese, "spinese", tumor ) ) %>%
+  mutate( tumor = ifelse( sample%in%stse, "stse", tumor ) )
+
+```
+
+
+have a first look at the clustering of the new measured samples
+```{r}
+brks <- ( seq(0, 1, length.out=50)[-1] )^0.7
+n = mf_83$processing=="new" & mf_83$replicate=="1"
+
+tumor <- as.matrix( mf_83[,6] )
+rownames( tumor ) <- mf_83$tag 
+tumor <- as.data.frame( tumor )
+
+pheatmap( 
+   cor(pept83_corr[ n,n ], use = "p"), colorRampPalette(brewer.pal( 11,"PuOr" ))(100), cluster_rows = TRUE, cluster_cols = TRUE, breaks=c(-rev(brks),0,brks), na_col = "grey" , annotation_col = tumor )
+```
+
+
+compare old and new measured 17 samples
+```{r}
+samples17 = mf_83$sample[mf_83$processing=="old"]
+
+processing <- as.matrix( mf_83[,3] )
+rownames( processing ) <- mf_83$tag 
+processing <- as.data.frame( processing )
+
+pheatmap( 
+   cor(pept83_corr[ , mf_83$sample%in%samples17 ], use = "p"), colorRampPalette(brewer.pal( 11,"PuOr" ))(100), cluster_rows = TRUE, cluster_cols = TRUE, breaks=c(-rev(brks),0,brks), na_col = "grey" , annotation_col = tumor, annotation_row =  processing)
+
+```
+
+
+multidensity plots of 17 samples
+```{r}
+multidensity( pept83_corr[,mf_83$sample%in%samples17], legend=FALSE,  col=c("black", "blue")[ as.integer( factor( mf_83$processing[mf_83$sample%in%samples17] ) ) ] )
+
+multidensity( pept83_corr[,mf_83$sample%in%samples17], legend=FALSE,  col=c("black", "blue")[ as.integer( factor( mf_83$tumor[mf_83$sample%in%samples17] ) ) ] )
+```
+
+Boxplot of 17 samples
+```{r}
+boxplot(pept83_corr[,mf_83$sample%in%samples17], legend=FALSE, col=c("black", "blue")[ as.integer( factor( mf_83$processing ) ) ] )
+```
+
+vsn normalization of 17 samples
+```{r}
+peptides_83_narm <- peptides_83[rowSums( is.na( pept83_corr_backup ) )!=ncol( pept83_corr_backup ),]
+pept83_vsn <- normalizeVSN( pept83_corr2 ) 
+rownames( pept83_vsn ) <- unlist( peptides_83_narm[,1] )
+
+multidensity( pept83_vsn[,mf_83$sample%in%samples17], legend=FALSE,  col=c("black", "blue")[ as.integer( factor( mf_83$processing ) ) ] )
+
+pheatmap( 
+   cor( pept83_vsn[ , mf_83$sample%in%samples17 ], use = "p" ), colorRampPalette(brewer.pal( 11,"PuOr" ))(100), cluster_rows = TRUE, cluster_cols = TRUE, breaks=c(-rev(brks),0,brks), na_col = "grey" , annotation_col = tumor, annotation_row = processing )
+
+```
+
+quantile normalization of 17 samples (on log2 scale and original data)
+ -> log2 scale -> enhances differences between old and new processed samples
+```{r}
+pept83_quant <- normalize.quantiles( pept83_corr2 )
+colnames( pept83_quant ) <- mf_83$tag
+
+pept83_quant_log <- log2( normalize.quantiles( pept83_corr2 ) )
+colnames( pept83_quant_log ) <- mf_83$tag
+rownames( pept83_quant_log ) <- unlist( peptides_83_narm[,1] )
+
+multidensity( pept83_quant[,mf_83$sample%in%samples17], legend=FALSE,  col=c("black", "blue")[ as.integer( factor( mf_83$processing ) ) ] )
+
+pheatmap( 
+   cor( pept83_quant[ , mf_83$sample%in%samples17 ], use = "p" ), colorRampPalette(brewer.pal( 11,"PuOr" ))(100), cluster_rows = TRUE, cluster_cols = TRUE, breaks=c(-rev(brks),0,brks), na_col = "grey" , annotation_col = tumor, annotation_row = processing )
+
+pheatmap( 
+   cor( pept83_quant_log[ , mf_83$sample%in%samples17 ], use = "p" ), colorRampPalette(brewer.pal( 11,"PuOr" ))(100), cluster_rows = TRUE, cluster_cols = TRUE, breaks=c(-rev(brks),0,brks), na_col = "grey" , annotation_col = tumor, annotation_row = processing )
+```
+
+Compare replicates and original samples
+```{r}
+replicates <- mf_83$sample[mf_83$replicate=="2"]
+
+multidensity( pept83_corr[,mf_83$sample%in%replicates], legend=FALSE,  col=c("black", "blue")[ as.integer( factor( mf_83$replicate[mf_83$sample%in%replicates] ) ) ] )
+
+repl <- as.matrix( mf_83[,2] )
+rownames( repl ) <- mf_83$tag 
+repl <- as.data.frame( repl )
+
+pheatmap( 
+   cor( pept83_corr[ , mf_83$sample%in%replicates ], use = "p" ), colorRampPalette(brewer.pal( 11,"PuOr" ))(100), cluster_rows = TRUE, cluster_cols = TRUE, breaks=c(-rev(brks),0,brks), na_col = "grey" , annotation_col = tumor, annotation_row = repl )
+
+pheatmap( 
+   cor( pept83_quant_log[ , mf_83$sample%in%replicates ], use = "p" ), colorRampPalette(brewer.pal( 11,"PuOr" ))(100), cluster_rows = TRUE, cluster_cols = TRUE, breaks=c(-rev(brks),0,brks), na_col = "grey" , annotation_col = tumor, annotation_row = repl )
+```
+
+Missing values
+```{r}
+
+r1 <- mf_83$replicate=="2"
+r2 <- mf_83$replicate=="1"&mf_83$sample%in%replicates
+
+misses <- as.data.frame( 
+  c(  pept83_corr[rowSums(is.na(pept83_corr[,r1]))!=ncol(pept83_corr[,r1]),r1] %>%
+    apply( 2, function(x) sum(is.na(x))),
+  pept83_corr[rowSums(is.na(pept83_corr[,r2]))!=ncol(pept83_corr[,r2]),r2] %>%
+    apply( 2, function(x) sum(is.na(x))) ) )
+misses <- rownames_to_column(misses) 
+colnames(misses) <- c("tag","missing_values") 
+misses <- left_join(misses, mf_83[mf_83$sample%in%replicates,])
+
+ord83 <- order( misses$missing_values[misses$replicate=="2"] )
+
+ggplot( misses, aes( x=sample, y=missing_values, col=replicate, group=replicate ) ) +
+  geom_point() +
+  geom_smooth( method="lm", se=FALSE ) +
+  scale_x_discrete( limits=misses$sample[misses$replicate=="2"][ord83] ) 
+```
+
+calculate number of rows containing only NA 
+```{r}
+sum(rowSums(is.na(pept83_corr_backup))==ncol(pept83_corr_backup))
+
+```
+
+
+correlation heatmap of quantile normalized and raw data
+```{r}
+pheatmap( 
+   cor(pept83_quant_log[ n,n ], use = "p"), colorRampPalette(brewer.pal( 11,"PuOr" ))(100), cluster_rows = TRUE, cluster_cols = TRUE, breaks=c(-rev(brks),0,brks), na_col = "grey" , annotation_col = tumor )
+
+pheatmap( 
+   cor(pept83_corr_backup[ n,n ], use = "p"), colorRampPalette(brewer.pal( 11,"PuOr" ))(100), cluster_rows = TRUE, cluster_cols = TRUE, breaks=c(-rev(brks),0,brks), na_col = "grey" , annotation_col = tumor )
+```
+
+Create linear model 
+```{r}
+mm <- model.matrix( ~ processing + tumor , mf_83 )
+fit <- lmFit( pept83_vsn, mm )
+fit_quant <- lmFit( pept83_quant_log, mm )
+coeff83 <- fit$coefficients
+```
+
+
+plot correlation and peptides that can be found in all samples (coefficients fit)
+```{r}
+pheatmap( 
+   cor( coeff83[ complete.cases(coeff83), 2:8], use = "p" ), colorRampPalette(brewer.pal( 11,"PuOr" ))(100), cluster_rows = TRUE, cluster_cols = TRUE, breaks=c(-rev(brks),0,brks), na_col = "grey" )
+
+pheatmap( 
+  coeff83[ complete.cases(coeff83), 2:8], colorRampPalette(brewer.pal( 11,"PuOr" ))(100), cluster_rows = TRUE, cluster_cols = TRUE, breaks=c(-rev(brks),0,brks), na_col = "grey" )
+```
+
+plot peptides with highest SD (coefficients fit)
+```{r}
+sd=apply( coeff83[complete.cases(coeff83),2:8], 1, sd, na.rm = TRUE )
+ord_sd = order(sd, decreasing = TRUE)
+
+pheatmap( 
+  coeff83[complete.cases(coeff83),][ord_sd[1:100], 2:8], colorRampPalette(brewer.pal( 11,"PuOr" ))(100), cluster_rows = FALSE, cluster_cols = TRUE, na_col = "grey" )
+```
+
+
+```{r}
+a <- peptides_83_narm[ peptides_83_narm$`Leading razor protein` == "Q15149",1]
+a <- as.integer( unlist( a ) )
+
+pept_id <- unlist( as.integer( rownames_to_column(topTable(eBayes(fit), coef = 3:8, number = Inf)[1:2000,])[,1] ) )
+pept_id_q <- unlist( as.integer( rownames_to_column(topTable(eBayes(fit_quant), coef = 3:8, number = Inf)[1:2000,])[,1] ) )
+
+peptides_fit <- peptides_83_narm$`Leading razor protein`[pept_id]
+```
+
+Pectin
+```{r}
+pectin <- peptides_83_narm[ peptides_83_narm$`Leading razor protein` == "Q15149",1]
+pectin <- as.integer( unlist( pectin ) )
+grep( "Q15149", peptides_fit )
+
+ggplot( cbind( mf_83, expr=pept83_vsn[rownames(pept83_vsn)==pectin[10],] ) )+geom_beeswarm( aes( x=tumor, y=expr, col=tumor, shape=processing ) )
+
+pheatmap( 
+  pept83_vsn[ rownames( pept83_vsn )%in%pectin, order( mf_83$tumor ) ], colorRampPalette(brewer.pal( 11,"PuOr" ) )(100), cluster_rows = FALSE, cluster_cols = FALSE, na_col = "grey" , annotation_col = tumor )
+```
+
+Beta-1,3-glucosyltransferase
+```{r}
+ggplot( cbind( mf_83, expr=pept83_vsn[rownames(pept83_vsn)==54363,] ) )+geom_beeswarm( aes( x=tumor, y=expr, col=tumor, shape=processing ) )
+peptides_83$`Leading razor protein`[54363]
+
+gtransferase <- peptides_83_narm[ peptides_83_narm$`Leading razor protein` == "Q6Y288",1]
+gtransferase <- as.integer( unlist(gtransferase ) )
+
+pheatmap( 
+  pept83_vsn[ rownames( pept83_vsn )%in%gtransferase, order( mf_83$tumor ) ], colorRampPalette(brewer.pal( 11,"PuOr" ) )(100), cluster_rows = FALSE, cluster_cols = FALSE, na_col = "grey", annotation_col = tumor )
+```
+
+Protein S100-B
+```{r}
+peptides_83$`Leading razor protein`[5035]
+ggplot( cbind( mf_83, expr=pept83_vsn[rownames(pept83_vsn)==5035,] ) )+geom_beeswarm( aes( x=tumor, y=expr, col=tumor, shape=processing ) )
+
+gtransferase <- peptides_83_narm[ peptides_83_narm$`Leading razor protein` == "P04271",1]
+gtransferase <- as.integer( unlist(gtransferase ) )
+
+pheatmap( 
+  pept83_vsn[ rownames( pept83_vsn )%in%gtransferase, order( mf_83$tumor ) ], colorRampPalette(brewer.pal( 11,"PuOr" ) )(100), cluster_rows = FALSE, cluster_cols = FALSE, na_col = "grey", annotation_col = tumor )
+
+```
+
+Gamma-interferon-inducible lysosomal thiol reductase
+```{r}
+peptides_83$`Leading razor protein`[25517]
+ggplot( cbind( mf_83, expr=pept83_vsn[rownames(pept83_vsn)==25517,] ) ) + geom_beeswarm( aes( x=tumor, y=expr, col=tumor, shape=processing ) )
+
+treductase <- peptides_83_narm[ peptides_83_narm$`Leading razor protein` == "P13284",1]
+treductase <- as.integer( unlist(treductase ) )
+
+pheatmap( 
+  pept83_vsn[ rownames( pept83_vsn )%in%treductase, order( mf_83$tumor )], colorRampPalette(brewer.pal( 11,"PuOr" ) )(100), cluster_rows = FALSE, cluster_cols = FALSE, na_col = "grey", annotation_col = tumor )
+
+```
+
+
+Galectin-1
+```{r}
+peptides_83$`Leading razor protein`[61029]
+ggplot( cbind( mf_83, expr=pept83_vsn[rownames(pept83_vsn)==61029,] ) ) + geom_beeswarm( aes( x=tumor, y=expr, col=tumor, shape=processing ) )
+
+galectin <- peptides_83_narm[ peptides_83_narm$`Leading razor protein` == "P09382",1]
+galectin <- as.integer( unlist( galectin ) )
+
+pheatmap( 
+  pept83_vsn[ rownames( pept83_vsn )%in%galectin, order( mf_83$tumor ) ], colorRampPalette(brewer.pal( 11,"PuOr" ) )(100), cluster_rows = FALSE, cluster_cols = FALSE, na_col = "grey", annotation_col = tumor )
+
+```
+
+
+Fructosamine-3-kinase
+```{r}
+peptides_83$`Leading razor protein`[42567]
+ggplot( cbind( mf_83, expr=pept83_vsn[rownames(pept83_vsn)==42567,] ) ) + geom_beeswarm( aes( x=tumor, y=expr, col=tumor, shape=processing ) )
+
+fkinase <- peptides_83_narm[ peptides_83_narm$`Leading razor protein` == "Q9H479",1]
+fkinase <- as.integer( unlist( fkinase ) )
+
+pheatmap( 
+  pept83_vsn[ rownames( pept83_vsn )%in%fkinase, order(mf_83$tumor) ], colorRampPalette(brewer.pal( 11,"PuOr" ) )(100), cluster_rows = FALSE, cluster_cols = FALSE, na_col = "grey", annotation_col = tumor )
+
+```
+
+Selenium-binding protein 1
+```{r}
+peptides_83$`Leading razor protein`[47619]
+ggplot( cbind( mf_83, expr=pept83_vsn[rownames(pept83_vsn)==47619,] ) ) + geom_beeswarm( aes( x=tumor, y=expr, col=tumor, shape=processing ) )
+
+seleniumprot <- peptides_83_narm[ peptides_83_narm$`Leading razor protein` == "Q13228",1]
+seleniumprot <- as.integer( unlist( seleniumprot ) )
+
+pheatmap( 
+  pept83_vsn[ rownames( pept83_vsn )%in%seleniumprot, order(mf_83$tumor) ], colorRampPalette(brewer.pal( 11,"PuOr" ) )(100), cluster_rows = FALSE, cluster_cols = FALSE, na_col = "grey", annotation_col = tumor )
+
+```
+
+Calcyphosin
+```{r}
+peptides_83$`Leading razor protein`[13763]
+ggplot( cbind( mf_83, expr=pept83_vsn[rownames(pept83_vsn)==13763,] ) ) + geom_beeswarm( aes( x=tumor, y=expr, col=tumor, shape=processing ) )
+
+calcyphosin <- peptides_83_narm[ peptides_83_narm$`Leading razor protein` == "Q13228",1]
+calcyphosin <- as.integer( unlist( calcyphosin ) )
+
+pheatmap( 
+  pept83_vsn[ rownames( pept83_vsn )%in%calcyphosin, order(mf_83$tumor) ], colorRampPalette(brewer.pal( 11,"PuOr" ) )(100), cluster_rows = FALSE, cluster_cols = FALSE, na_col = "grey", annotation_col = tumor )
+
+```
+
+
+Thymosin beta-4;Hematopoietic system regulatory peptide
+```{r}
+peptides_83$`Leading razor protein`[60164]
+ggplot( cbind( mf_83, expr=pept83_vsn[rownames(pept83_vsn)==60164,] ) ) + geom_beeswarm( aes( x=tumor, y=expr, col=tumor, shape=processing ) )
+
+thymosinbeta <- peptides_83_narm[ peptides_83_narm$`Leading razor protein` == "P62328",1]
+thymosinbeta <- as.integer( unlist( thymosinbeta ) )
+
+pheatmap( 
+  pept83_vsn[ rownames( pept83_vsn )%in%thymosinbeta, order(mf_83$tumor) ], colorRampPalette(brewer.pal( 11,"PuOr" ) )(100), cluster_rows = FALSE, cluster_cols = FALSE, na_col = "grey", annotation_col = tumor )
+
+```
+
+
+Phosphatidylethanolamine-binding protein 1;Hippocampal cholinergic neurostimulating peptide
+```{r}
+peptides_83$`Leading razor protein`[74265]
+ggplot( cbind( mf_83, expr=pept83_vsn[rownames(pept83_vsn)==74265,] ) ) + geom_beeswarm( aes( x=tumor, y=expr, col=tumor, shape=processing ) )
+
+phosphatprot <- peptides_83_narm[ peptides_83_narm$`Leading razor protein` == "P30086",1]
+phosphatprot <- as.integer( unlist( phosphatprot ) )
+
+pheatmap( 
+  pept83_vsn[ rownames( pept83_vsn )%in%phosphatprot, order(mf_83$tumor) ], colorRampPalette(brewer.pal( 11,"PuOr" ) )(100), cluster_rows = FALSE, cluster_cols = FALSE, na_col = "grey", annotation_col = tumor )
+
+```
+
+
+```{r}
+pheatmap( 
+  pept83_vsn[ rownames( pept83_vsn )%in%pept_id[1:1000], order( mf_83$tumor ) ], colorRampPalette(brewer.pal( 11,"PuOr" ))(100), cluster_rows = FALSE, cluster_cols = FALSE, na_col = "grey" , annotation_col = tumor)
+
+pheatmap( 
+  pept83_vsn[ rownames( pept83_vsn )%in%pept_id[1:1000], order( mf_83$tumor ) ], colorRampPalette(brewer.pal( 11,"PuOr" ))(100), cluster_rows = FALSE, cluster_cols = TRUE, na_col = "grey" , annotation_col = tumor)
+```
+
+
+compute distance matrix and run tsne
+```{r}
+dist83 <- dist( t( pept83_vsn ) )
+dist83_man <- dist( t( pept83_vsn ), method = "manhattan" )
+
+tsne_83 <- tsne( dist83, perplexity = 30 )
+tsne_83 <- as.tibble( tsne_83 ) %>%
+  mutate( tag = mf_83$tag ) %>%
+  left_join( mf_83 )
+
+tsne_83_p40 <- tsne( dist83, perplexity = 40 )
+tsne_83_p40 <- as.tibble( tsne_83_p40 ) %>%
+  mutate( tag = mf_83$tag ) %>%
+  left_join( mf_83 )
+
+tsne_83_p50 <- tsne( dist83, perplexity = 50 )
+tsne_83_p50 <- as.tibble( tsne_83_p50 ) %>%
+  mutate( tag = mf_83$tag ) %>%
+  left_join( mf_83 )
+
+tsne_83_p20 <- tsne( dist83, perplexity = 20 )
+tsne_83_p20 <- as.tibble( tsne_83_p20 ) %>%
+  mutate( tag = mf_83$tag ) %>%
+  left_join( mf_83 )
+
+tsne_83_p15 <- tsne( dist83, perplexity = 15 )
+tsne_83_p15 <- as.tibble( tsne_83_p15 ) %>%
+  mutate( tag = mf_83$tag ) %>%
+  left_join( mf_83 )
+
+tsne_83m <- tsne( dist83_man )
+tsne_83m <- as.tibble( tsne_83m ) %>%
+  mutate( tag = mf_83$tag ) %>%
+  left_join( mf_83 )
+
+ggplot( tsne_83 ) +
+  geom_point( aes( x=V1, y=V2, col=tumor ), size=3 ) +
+  scale_colour_manual( name="",  values = colorRampPalette(brewer.pal( 8,"Accent" ))(8) )
+
+ggplot( tsne_83m ) +
+  geom_point( aes( x=V1, y=V2, col=tumor ), size=3 ) +
+  scale_colour_manual( name="",  values = colorRampPalette(brewer.pal( 8,"Accent" ))(8) )
+
+```
+
+remove pfb samples and run dist, tsne and heatmap clustering again
+```{r}
+pept83_vsn_pfb <- pept83_vsn[,mf_83$tumor!="pfb"]
+
+dist83_pfb <- dist( t( pept83_vsn_pfb ) )
+
+tsne_83_pfb <- tsne( dist83_pfb, perplexity = 25 )
+tsne_83_pfb <- as.tibble( tsne_83_pfb ) %>%
+  mutate( tag = mf_83$tag[mf_83$tumor!="pfb"] ) %>%
+  left_join( mf_83 )
+
+ggplot( tsne_83_pfb ) +
+  geom_point( aes( x=V1, y=V2, col=tumor ), size=3 ) +
+  scale_colour_manual( name="",  values = colorRampPalette(brewer.pal( 8,"Accent" ))(8) )
+
+```
+
+redo the fit on the pfb removed vsn data
+```{r}
+mm_pfb <- model.matrix( ~ processing + tumor , mf_83[mf_83$tumor!="pfb",] )
+fit_pfb <- lmFit( pept83_vsn_pfb, mm_pfb )
+
+pept_id_pfb <- unlist( as.integer( rownames_to_column(topTable(eBayes(fit_pfb), coef = 3:7, number = Inf)[1:2000,])[,1] ) )
+
+pheatmap( 
+  pept83_vsn_pfb[ rownames( pept83_vsn_pfb )%in%pept_id_pfb[1:1000], order( mf_83$tumor[mf_83$tumor!="pfb"] ) ], colorRampPalette(brewer.pal( 11,"PuOr" ))(100), cluster_rows = FALSE, cluster_cols = TRUE, na_col = "grey" , annotation_col = tumor)
+```
+
+redo the fit on the pfb removed quantile normalized data 
+```{r}
+pept83_quant_pfb <- pept83_quant_log[ , mf_83$tumor!="pfb" ]
+mm_pfb <- model.matrix( ~ processing + tumor , mf_83[mf_83$tumor!="pfb",] )
+fit_quant_pfb <- lmFit( pept83_quant_pfb, mm_pfb )
+
+pept_id_quant_pfb <- unlist( as.integer( rownames_to_column(topTable(eBayes(fit_quant_pfb), coef = 3:7, number = Inf)[1:2000,])[,1] ) )
+
+pheatmap( 
+  pept83_quant_pfb[ rownames( pept83_quant_pfb )%in%pept_id_quant_pfb[1:1000], order( mf_83$tumor[mf_83$tumor!="pfb"] ) ], colorRampPalette(brewer.pal( 11,"PuOr" ))(100), cluster_rows = FALSE, cluster_cols = TRUE, na_col = "grey" , annotation_col = tumor)
+```
+
+remove pfb samples and run dist, tsne and heatmap clustering again (for quantile normalized data)
+```{r}
+dist83_quant_pfb <- dist( t( pept83_quant_pfb ) )
+
+tsne83_quant_pfb <- tsne( dist83_quant_pfb, perplexity = 25 )
+tsne83_quant_pfb <- as.tibble( tsne83_quant_pfb ) %>%
+  mutate( tag = mf_83$tag[mf_83$tumor!="pfb"] ) %>%
+  left_join( mf_83 )
+
+ggplot( tsne83_quant_pfb ) +
+  geom_point( aes( x=V1, y=V2, col=tumor ), size=3 ) +
+  scale_colour_manual( name="",  values = colorRampPalette(brewer.pal( 8,"Accent" ))(8) )
+
+```
+
+find peptides that differ most from one tumor group (with respect to the other groups)
+```{r}
+mean_relpos <- rowMeans( pept83_vsn[, mf_83$tumor=="relpos"], na.rm = TRUE )
+mean_pept_relpos <- rowMeans( pept83_vsn[, mf_83$tumor!="relpos"], na.rm =TRUE )
+
+dmean_relpos <- mean_pept_relpos - mean_relpos %>%
+  as.data.frame()
+rownames( dmean_relpos ) = rownames( pept83_vsn )
+dmean_relpos <- rownames_to_column( dmean_relpos )
+dmean_relpos <-  rename( dmean_relpos, mean_diff = . )
+
+pept83_relpos_id <- order( desc( abs( dmean_relpos$mean_diff ) ) )[1:5000]
+pept83_relpos <- peptides_83[dmean_relpos$rowname[pept83_relpos_id],]
+write.table( unique( pept83_relpos$`Leading razor protein` ), "peptides_relpos", row.names=FALSE, quote=FALSE )  
+
+write.table( unique( peptides_83$`Leading razor protein` ), "peptides83", row.names=FALSE, quote=FALSE )
+```
+
+heatmap of the distance matrix
+```{r}
+ pheatmap( dist83_pfb, colorRampPalette(brewer.pal( 11,"PuOr" ))(100), cluster_rows = TRUE, cluster_cols = TRUE, na_col = "grey" , annotation_col = tumor)
+```
+
+```{r}
+
+```
+
+
