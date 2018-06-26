@@ -18,6 +18,7 @@ the tumor subgroups were suggested in the paper:
 - `Notebook_17samples.Rmd` -- R Notebook (this Notebook was coded first, when there was only the pilot data of the first 17 samples was available), shows how to load the data (peptides table for the 17 samples (pilot data), MaxQuant, is the only data required), prepare the data for working with it and some analysis (focus on missing values analysis considering the type of identification, MS/MS vs. Matching, some clustering regards the two tumor subgroups PFA and RELPOS)
 - `Notebook_17samples.nb` -- HTML Version of the R Notebook (17 samples)
 - `Sample_summary.pptx` -- PowerPoint Presentation with information about the naming and classification of the samples
+- `overview_project.pptx` -- PowerPoint Presentation with information about the tumor subgroups, processing of the samples...
 
 ![Number of samples per subgroup](images/EPNsubgroups.png)
 
