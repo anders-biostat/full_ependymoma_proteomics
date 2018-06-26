@@ -4,6 +4,9 @@ Annika Weber 06/2018
 analysis of 111 samples from 8 different tumor subgroups (83 different tumor probes, partly twice measured)
 the tumor subgroups were suggested in the paper: 
 
+*Pajtler, K. W. et al. Molecular Classification of Ependymal Tumors across All CNS Compartments, Histopathological Grades, and Age Groups. Cancer Cell 27, 728–743 (2015)*
+
+
 ### Sample Set Summary (for the 111 samples)
 - 17x EPN samples (pilot project, only the Top2 - 1st measured technical replicate out of 3)
 - Extra 83x EPN samples (66 new and 17 replicates of the pilot samples; started again from tissue)
