@@ -9,13 +9,13 @@ analysis of 111 samples from 8 different tumor subgroups (83 different tumor pro
 - 1x (R1-2_7EP5) technical injection of “LFQ intensity 80416_QE1_TM_fullEPN_7EP5”
 - 10x EPN83 replicates (starting from same tissue again; due to low ID rate or overall low performance) 
 
-![Number of samples per subgroup](C:/Users/Annika/ZMBH/GitHub/full_ependymoma_proteomics/EPNsubgroups.png)
+![Number of samples per subgroup](EPNsubgroups.png)
 
-![Subgroups 83 samples](C:/Users/Annika/ZMBH/GitHub/full_ependymoma_proteomics/subtype83samples.png)
+![Subgroups 83 samples](subtype83samples.png)
 
-![Subgroups 17 samples](C:/Users/Annika/ZMBH/GitHub/full_ependymoma_proteomics/subtype17samples.png)
+![Subgroups 17 samples](subtype17samples.png)
 
-![Sample naming Pilot](C:/Users/Annika/ZMBH/GitHub/full_ependymoma_proteomics/sample_naming_pilot.jpg)
+![Sample naming Pilot](sample_naming_pilot.jpg)
 
 ### Files
 - `README.md`
