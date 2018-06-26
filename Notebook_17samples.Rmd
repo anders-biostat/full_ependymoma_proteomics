@@ -1,0 +1,511 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
+
+Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Ctrl+Shift+Enter*. 
+
+```{r}
+library(readr)
+library(readxl)
+library(tidyverse)
+library(pheatmap)
+library(RColorBrewer)
+library(limma)
+library(XML)
+library(genefilter)
+library(cowplot)
+library(vsn)
+library(MSnbase)
+library(Rcpp)
+library(rje)
+library(xlsx)
+
+if (!require("devtools")) {
+  install.packages("devtools", dependencies = TRUE)
+  library(devtools)
+}
+install_github("raivokolde/pheatmap")
+```
+
+First step: load the data (Peptides table)
+```{r}
+
+peptides_17 <- read_excel( "C:/Users/Annika/ZMBH/DKFZ-Krijgsveld/17samples/peptides.xlsx" )
+peptides_17[1:10,1:20]
+
+peptides_3rep <- read_delim("C:/Users/Annika/ZMBH/DKFZ-Krijgsveld/17samples/3replicatesT2/20180525_peptides_3reps.txt", "\t", escape_double = FALSE, trim_ws = TRUE)
+peptides_3rep[1:10,1:20]
+
+```
+
+Prepare the data for working with it (17 samples)
+```{r}
+
+pept17_corr_backup <- peptides_17 %>%
+  select( starts_with("Intensity") ) %>%
+  select( contains("T2") ) %>%
+  rename_all( str_replace, "Intensity 0915_QE1_TM_EPN_", "" )  %>%
+  rename_all( str_replace, "Intensity 1013_QE1_TM_EPN_", "" )  %>%
+  rename_all( str_replace, "9EP48", "9EP29" )  %>%
+  rename_all( str_replace, "_1", "" )  
+pept17_corr_backup[pept17_corr_backup==0]=NA
+pept17_corr_backup=as.matrix( pept17_corr_backup )
+
+pept17_corr <- log2( pept17_corr_backup )
+```
+
+Prepare the data for working with it (3 replicates T2)
+```{r}
+
+pept3rep_corr_backup <- peptides_3rep %>%
+  select( starts_with("Intensity") ) %>%
+  select( contains("T2") ) %>%
+  rename_all( str_replace, "Intensity EPN_", "" )  %>%
+  rename_all( str_replace, "reps_", "" )  %>%
+  rename_all( str_replace, "9EP48", "9EP29" )  %>%
+  rename_all( str_replace, "_1", "" )  
+pept3rep_corr_backup[pept3rep_corr_backup==0]=NA
+pept3rep_corr_backup=as.matrix( pept3rep_corr_backup )
+
+pept3rep_corr <- log2( pept3rep_corr_backup )
+```
+
+Create model frame (3 replicates T2)
+```{r}
+mf_3rep <- as.tibble( colnames( pept3rep_corr ) ) %>%
+  rename( tag = value ) %>%
+  mutate( method = str_extract( tag, "(T20|T2)" ) ) %>%
+  mutate( sample = str_extract( tag, ".*(?=_)" ) ) %>%
+  mutate( tumor = ifelse( sample=="7EP34"|sample=="4EP29"|sample=="9EP29"|sample=="4EP5","PFA","RELPOS") ) %>%
+  mutate( repl = ifelse( method=="T2","3 Repl","1 Repl" ) ) 
+```
+
+Create model frame (17 samples)
+```{r}
+mf_17 <- as.tibble( colnames( pept17_corr ) ) %>%
+  rename( tag = value ) %>%
+  mutate( method = str_extract( tag, "(T20|T2)" ) ) %>%
+  mutate( sample = str_extract( tag, ".*(?=_)" ) ) %>%
+  mutate( tumor = ifelse( sample=="7EP34"|sample=="4EP29"|sample=="9EP29"|sample=="4EP5","PFA","RELPOS") ) %>%
+  mutate( repl = "1 Repl" ) 
+```
+
+
+```{r}
+
+plot(pept17_corr[,1], pept17_corr[,2], pch=".", asp=1)
+abline(0,1)
+plot(pept17_corr[,1], pept17_corr[,18], pch=".", asp=1)
+abline(0,1)
+```
+
+
+```{r}
+brks <- ( seq(0, 1, length.out=50)[-1] )^0.4
+max_value <-max( abs( cov( pept17_corr, use = "p" ) ), na.rm = TRUE ) 
+max_value3 <- max( abs( cov( pept3rep_corr, use = "p" ) ), na.rm = TRUE ) 
+
+tumor <- as.matrix( mf_17[,4] )
+rownames( tumor ) <- mf_17$tag 
+tumor <- as.data.frame( tumor )
+
+tumor3 <- as.matrix( mf_3rep[,4] )
+rownames( tumor3 ) <- mf_3rep$tag 
+tumor3 <- as.data.frame( tumor3 )
+
+pheatmap( 
+   cor(pept17_corr, use = "p"),
+   colorRampPalette(brewer.pal( 11,"PuOr" ))(100), cluster_rows = TRUE, cluster_cols = TRUE, 
+   breaks=c(-rev(brks),0,brks), na_col = "grey" , annotation_col = tumor )
+
+pheatmap( 
+   cor(pept3rep_corr, use = "p"),
+   colorRampPalette(brewer.pal( 11,"PuOr" ))(100), cluster_rows = TRUE, cluster_cols = TRUE, 
+   breaks=c(-rev(brks),0,brks), na_col = "grey" , annotation_col = tumor3 )
+
+brks <- ( seq(0, 1, length.out=50)[-1] )^0.7
+
+pheatmap( 
+   cov(pept17_corr, use = "p"),
+   colorRampPalette(brewer.pal( 11,"PuOr" ))(100), cluster_rows = TRUE, cluster_cols = TRUE, 
+   breaks=max_value*c(-rev(brks),0,brks), na_col = "grey" , annotation_col = tumor )
+
+pheatmap( 
+   cov(pept3rep_corr, use = "p"),
+   colorRampPalette(brewer.pal( 11,"PuOr" ))(100), cluster_rows = TRUE, cluster_cols = TRUE, 
+   breaks=max_value3*c(-rev(brks),0,brks), na_col = "grey" , annotation_col = tumor3 )
+```
+
+```{r}
+t2 <- mf_17$method=="T2"
+t20<- mf_17$method=="T20"
+tumor_T2 <- as.data.frame( tumor[t2,] )
+tumor_T20 <- as.data.frame( tumor[t20,] )
+
+t3 <- mf_3rep$method=="T2"
+t30<- mf_3rep$method=="T20"
+tumor3_T2 <- as.data.frame( tumor3[t3,] )
+tumor3_T20 <- as.data.frame( tumor3[t30,] )
+
+pept3rep_T2 <- pept3rep_corr[,mf_3rep$method=="T2"]
+pept17_T2 <- pept17_corr[,mf_17$method=="T2"]
+
+pheatmap( 
+   cor( pept17_T2, use = "p" ),
+   colorRampPalette(brewer.pal( 11,"PuOr" ))(100), cluster_rows = TRUE, cluster_cols = TRUE, 
+   breaks=c(-rev(brks),0,brks), na_col = "grey", annotation_col =  tumor_T2 )
+
+pheatmap( 
+   cor( pept3rep_T2, use = "p" ),
+   colorRampPalette(brewer.pal( 11,"PuOr" ))(100), cluster_rows = TRUE, cluster_cols = TRUE, 
+   breaks=c(-rev(brks),0,brks), na_col = "grey", annotation_col =  tumor3_T2 )
+
+pheatmap( 
+   cor( pept17_corr[,mf_17$method=="T20"], use = "p" ),
+   colorRampPalette(brewer.pal( 11,"PuOr" ))(100), cluster_rows = TRUE, cluster_cols = TRUE, 
+   breaks=c(-rev(brks),0,brks), na_col = "grey", annotation_col = tumor_T20 )
+
+pheatmap( 
+   cor( pept3rep_corr[,mf_3rep$method=="T20"], use = "p" ),
+   colorRampPalette(brewer.pal( 11,"PuOr" ))(100), cluster_rows = TRUE, cluster_cols = TRUE, 
+   breaks=c(-rev(brks),0,brks), na_col = "grey", annotation_col = tumor3_T20 )
+
+
+
+```
+
+compare only T2 runs
+```{r}
+pept_T2_backup <- left_join( as.data.frame( cbind( peptides_17$Sequence, pept17_T2 ) ), as.data.frame( cbind( peptides_3rep$Sequence, pept3rep_T2) ) )
+pept_T2 <-  as.matrix(apply(pept_T2_backup[,2:35],2, as.numeric))
+
+mf_T2 <- rbind( mf_17[ mf_17$method=="T2", ], mf_3rep[ mf_3rep$method=="T2", ] )
+
+tumor1_T2 <- as.matrix( mf_T2[,4] )
+rownames( tumor1_T2 ) <- mf_T2$tag 
+tumor1_T2 <- as.data.frame( tumor1_T2 )
+
+pheatmap( 
+   cor( pept_T2, use = "p" ),
+   colorRampPalette(brewer.pal( 11,"PuOr" ))(100), cluster_rows = TRUE, cluster_cols = TRUE, 
+   breaks=c(-rev(brks),0,brks), na_col = "grey", annotation_col =  tumor1_T2 )
+```
+
+
+Multidensity plots
+```{r}
+geneplotter::multidensity( pept17_corr, legend=FALSE,  col=c("black", "blue")[ as.integer( factor( mf_17$method ) ) ] )
+
+geneplotter::multidensity( pept17_corr, legend=FALSE,  col=c("blue", "black")[ as.integer( factor( mf_17$tumor ) ) ] )
+
+geneplotter::multidensity( pept17_corr[,1:17], legend=FALSE,  col="black" )
+geneplotter::multidensity( pept17_corr[,18:34], legend=FALSE,  col="blue" )
+
+geneplotter::multidensity( pept17_corr[,c(2,19)], legend=FALSE,  col=c("black", "blue")[ as.integer( factor( mf_17$method [c(2,19)] ) ) ] )
+
+geneplotter::multidensity( pept17_corr[,c(3,20)], legend=FALSE,  col=c("black", "blue")[ as.integer( factor( mf_17$method [c(3,20)] ) ) ] )
+
+```
+
+Compare densities for 3 replicates T2 and 1 replicate T2
+```{r}
+geneplotter::multidensity( pept_T2, legend=FALSE,  col=c("black", "blue")[ as.integer( factor( mf_T2$repl ) ) ] )
+```
+
+
+
+Boxplot
+```{r}
+boxplot(pept17_corr, legend=FALSE, col=c("black", "blue")[ as.integer( factor( mf_17$method ) ) ] )
+
+boxplot(pept_T2, legend=TRUE, col=c("black", "blue")[ as.integer( factor( mf_T2$repl ) ) ] )
+
+```
+
+Violin plot
+```{r}
+index <- rep(1:77897, 34)
+pept17_long <- gather( as.tibble( pept17_corr[ peptides_17$Sequence %in% peptides_3rep$Sequence,] ), tag, intensity, `3EP11_T2`:`9EP29_T20`)
+pept17_long <- cbind( index, left_join( pept17_long, mf_17 ) ) %>%
+   mutate( id = str_c( index, "_", tag ) )
+
+median.quartile <- function(x){
+  out <- quantile(x, probs = c(0.25,0.5,0.75))
+  names(out) <- c("ymin","y","ymax")
+  return(out) 
+}
+
+ggplot(pept17_long, aes(tag,intensity, col=sample, fill=sample)) +
+  geom_violin(width=2) +
+  geom_hline(yintercept=seq(15,35,5), alpha=0.2) +
+  stat_summary(fun.y=median.quartile, geom='point', col = "black") +
+  stat_summary(fun.y=median.quartile, geom='line', col = "black") +
+  facet_wrap(~method, ncol = 1)
+
+ggplot(pept17_long, aes(tag,intensity, col=tumor, fill=tumor)) +
+  geom_violin(width=2) +
+  geom_hline(yintercept=seq(15,35,5), alpha=0.2) +
+  stat_summary(fun.y=median.quartile, geom='point', col = "black") +
+  stat_summary(fun.y=median.quartile, geom='line', col = "black") +
+  facet_wrap(~method, ncol = 1)
+```
+
+```{r}
+table <- as.tibble(mf_17$tag) %>%
+  mutate( misses = apply( pept17_corr, 2, function(x) sum(is.na(x) ) ) ) %>%
+  rename( tag=value ) %>%
+  left_join( mf_17 )
+
+ord17_1 <- order( table$misses[1:17] )
+
+c( mean( table$misses[1:17] ), mean( table$misses[18:34] ) )
+
+ggplot( table, aes( x=sample, y=misses, col=method, group=method ) ) + 
+  geom_point() +
+  geom_smooth(method="lm", se=FALSE) +
+  scale_x_discrete( limits=mf_17$sample[ord17_1] )
+
+```
+
+Identification type matrix
+```{r}
+index <- rep(1:77897, 34)
+
+id_17 <- peptides_17[ peptides_17$Sequence %in% peptides_3rep$Sequence,] %>%
+  select( starts_with( "Identification" ) ) %>%
+  select( -contains( "Library" ) ) %>%
+  rename_all(str_replace,"Identification type ", "") %>%
+  rename_all( str_replace, "0915_QE1_TM_EPN_", "" )  %>%
+  rename_all( str_replace, "1013_QE1_TM_EPN_", "" )  %>%
+  rename_all( str_replace, "9EP48", "9EP29" )  %>%
+  rename_all( str_replace, "_1", "" )
+
+id_17_long <- gather( as.tibble( id_17 ), tag, identification, `3EP11_T2`:`9EP29_T20`) %>%
+  cbind( index ) %>%
+  mutate( id = str_c( index, "_", tag ) )
+pept17_long <- left_join( pept17_long, id_17_long )
+```
+
+```{r}
+pept3rep_long <- gather( as.tibble( pept3rep_corr[peptides_3rep$Sequence %in% peptides_17$Sequence,] ), tag, intensity, `3EP11_T20`:`9EP29_3T2`)
+pept3rep_long <- cbind( index, left_join( pept3rep_long, mf_3rep ) ) %>%
+   mutate( id = str_c( index, "_", tag ) )
+
+id_3rep <- peptides_3rep[peptides_3rep$Sequence %in% peptides_17$Sequence,] %>%
+  select( starts_with( "Identification" ) ) %>%
+  select( -contains( "Library" ) ) %>%
+  rename_all(str_replace,"Identification type EPN_", "") %>%
+  rename_all( str_replace, "reps_", "" )  %>%
+  rename_all( str_replace, "9EP48", "9EP29" ) %>%
+  rename_all( str_replace, "_1", "" )
+
+id_3rep_long <- gather( as.tibble( id_3rep ), tag, identification, `3EP11_T20`:`9EP29_3T2`) %>%
+  cbind( index ) %>%
+  mutate( id = str_c( index, "_", tag ) )
+pept3rep_long <- left_join( pept3rep_long, id_3rep_long )
+```
+PROBLEM: for 3 repl no identification type!!!
+
+Missing values
+```{r}
+table_notna <- pept17_long[complete.cases(pept17_long),] %>%
+  group_by( sample, method, identification ) %>%
+  summarise( peptides=n() )
+
+misses <- as.data.frame( 
+  c(  pept17_corr[rowSums(is.na(pept17_corr[,mf_17$method=="T2"]))!=ncol(pept17_corr[,mf_17$method=="T2"]),mf_17$method=="T2"] %>%
+    apply( 2, function(x) sum(is.na(x))),
+  pept17_corr[rowSums(is.na(pept17_corr[,mf_17$method=="T20"]))!=ncol(pept17_corr[,mf_17$method=="T20"]),mf_17$method=="T20"] %>%
+    apply( 2, function(x) sum(is.na(x))) ) )
+misses <- rownames_to_column(misses) 
+colnames(misses) <- c("tag","missing_values") 
+misses <- mutate( misses, method = str_extract( tag, "(T20|T2)" ) ) %>%
+  mutate( sample = str_extract( tag, ".*(?=_)" ) ) %>%
+  mutate( identification = "By MS/MS" )
+
+misses2 <- misses %>%
+  mutate( identification = "By Matching" ) %>%
+  mutate( missing_values = NA )
+misses <- as.data.frame( rbind( misses, misses2 ) ) 
+
+table <- left_join( table_notna, misses[,2:5] ) %>%
+  gather( id_missing, number, peptides:missing_values )
+
+ggplot( table[complete.cases(table),], aes( x=sample, y=number, col=interaction(identification, id_missing), shape=method, group=interaction( method, identification, id_missing ) ) ) + 
+  geom_point( size= 2 ) +
+  geom_smooth(method="lm", se=FALSE) +
+  scale_x_discrete( limits=mf_17$sample[ord17_1] )
+```
+
+```{r}
+peptT2_long <- rbind( pept17_long[ pept17_long$method=="T2" ,], pept3rep_long[ pept3rep_long$method=="T2",] )
+
+table_notna_T2 <- peptT2_long[complete.cases(peptT2_long),] %>%
+  group_by( sample, repl, identification ) %>%
+  summarise( peptides=n() )
+
+misses_T2 <- as.data.frame( 
+  c(  pept_T2[rowSums(is.na(pept_T2[,mf_T2$repl=="1 Repl"]))!=ncol(pept_T2[,mf_T2$repl=="1 Repl"]), mf_T2$repl=="1 Repl"] %>%
+    apply( 2, function(x) sum(is.na(x))),
+  pept_T2[rowSums(is.na(pept_T2[,mf_T2$repl=="3 Repl"]))!=ncol(pept_T2[,mf_T2$repl=="3 Repl"]), mf_T2$repl=="3 Repl"] %>%
+    apply( 2, function(x) sum(is.na(x))) ) )
+misses_T2 <- rownames_to_column(misses_T2) 
+colnames(misses_T2) <- c("tag","missing_values") 
+misses_T2 <- mutate( misses_T2, method = str_extract( tag, "(3T2|T2)" ) ) %>%
+  mutate( repl= ifelse( method=="T2", "1 Repl", "3 Repl" ) ) %>%
+  mutate( sample = str_extract( tag, ".*(?=_)" ) ) %>%
+  mutate( identification = "By MS/MS" ) %>%
+  select( -method, -tag )
+
+table_T2 <- left_join( table_notna_T2, misses_T2 ) %>%
+  gather( id_missing, number, peptides:missing_values )
+
+ggplot( table_T2[complete.cases(table_T2),], aes( x=sample, y=number, col=interaction(identification, id_missing), shape=repl, group=interaction( repl, identification, id_missing ) ) ) + 
+  geom_point( size= 2 ) +
+  geom_smooth(method="lm", se=FALSE) +
+  scale_x_discrete( limits=mf_17$sample[ord17_1] )
+```
+
+
+
+Limma
+```{r}
+mm <- model.matrix( ~ method + tumor, mf_17 )
+fit <- lmFit(pept17_corr,mm)
+coeff17 <- fit$coefficients
+
+high_pept17_idx <- order(coeff17[,3])[1:5000]
+low_pept17_idx <- order(desc(coeff17[,3]))[1:5000]
+pept17_high <- peptides_17[high_pept17_idx,]
+pept17_low <- peptides_17[low_pept17_idx,]
+
+write.table(unique(pept17_high$`Gene names`),"genenames_high",row.names=FALSE,quote=FALSE)
+write.table(unique(pept17_low$`Gene names`),"genenames_low",row.names=FALSE,quote=FALSE)
+write.table(unique(peptides_17$`Proteins`),"proteins",row.names=FALSE,quote=FALSE)
+```
+
+
+```{r}
+
+pheatmap( 
+       pept17_corr[ low_pept17_idx[1:1000], mf_17$method=="T2" ],
+       colorRampPalette(brewer.pal( 11,"PuOr" ))(100), cluster_rows = FALSE, cluster_cols = TRUE,
+       na_col = "grey" , annotation_col = tumor, show_rownames = F)
+pheatmap( 
+       pept17_corr[ low_pept17_idx[1:300], mf_17$method=="T20" ],
+       colorRampPalette(brewer.pal( 11,"PuOr" ))(100), cluster_rows = FALSE, cluster_cols = TRUE,
+       na_col = "grey" , annotation_col = tumor, show_rownames = F)
+
+pheatmap( 
+       pept17_corr[ high_pept17_idx[1:500], ],
+       colorRampPalette(brewer.pal( 11,"PuOr" ))(100), cluster_rows = FALSE, cluster_cols = TRUE, 
+       na_col = "grey" , annotation_col = tumor, show_rownames = F)
+```
+
+
+```{r}
+pept17_full <- pept17_corr[complete.cases(pept17_corr),]
+mm <- model.matrix( ~ method + tumor, mf_17 )
+fit_f <- lmFit(pept17_full,mm)
+coeff17_f <- fit_f$coefficients
+
+high_pept17f_idx <- order(coeff17_f[,3])
+low_pept17f_idx <- order(desc(coeff17_f[,3]))
+
+pheatmap( 
+       pept17_full[ low_pept17f_idx[1:100], mf_17$method=="T2" ],
+       colorRampPalette(brewer.pal( 11,"PuOr" ))(100), cluster_rows = FALSE, cluster_cols = TRUE,
+       na_col = "grey" , annotation_col = tumor, show_rownames = F)
+
+pheatmap( 
+       pept17_full[ high_pept17f_idx[1:100], mf_17$method=="T2"  ],
+       colorRampPalette(brewer.pal( 11,"PuOr" ))(100), cluster_rows = FALSE, cluster_cols = TRUE, 
+        na_col = "grey" , annotation_col = tumor, show_rownames = F)
+
+pheatmap( 
+       pept17_full[ , mf_17$method=="T2"  ],
+       colorRampPalette(brewer.pal( 11,"PuOr" ))(100), cluster_rows = TRUE, cluster_cols = TRUE, 
+        na_col = "grey" , annotation_col = tumor, show_rownames = F)
+```
+
+
+```{r}
+rownames(mf_17) <- mf_17$tag
+pept17_msn <- MSnSet(pept17_corr_backup, as.data.frame(peptides_17[, c("id",
+  "Sequence","Proteins","Leading razor protein","Gene names","Protein names")]), 
+  as.data.frame(mf_17))
+pept17_msn <- filterNA(pept17_msn, pNA = 0)
+pept17_msn <- normalise(pept17_msn, "quantiles.robust")
+
+pept17_msn_corr <- exprs(pept17_msn) %>%
+  as.tibble()
+```
+
+
+```{r}
+brks <- ( seq(0, 1, length.out=50)[-1] )^0.5
+
+pheatmap( 
+       log2( pept17_msn_corr )[ , mf_17$method=="T2"],
+       colorRampPalette(brewer.pal( 11,"PuOr" ))(100), cluster_rows = TRUE, cluster_cols = TRUE, 
+        na_col = "grey" , annotation_col = tumor, show_rownames = F)
+
+pheatmap( 
+   cor(pept17_msn_corr, use = "p"),
+   colorRampPalette(brewer.pal( 11,"PuOr" ))(100), cluster_rows = TRUE, cluster_cols = TRUE, 
+   breaks=c(-rev(brks),0,brks), na_col = "grey" , annotation_col = tumor )
+
+pheatmap( 
+   cor( log2( pept17_msn_corr ), use = "p"),
+   colorRampPalette(brewer.pal( 11,"PuOr" ))(100), cluster_rows = TRUE, cluster_cols = TRUE, 
+   breaks=c(-rev(brks),0,brks), na_col = "grey" , annotation_col = tumor )
+
+pheatmap( 
+   cor(pept17_msn_corr[ , mf_17$method=="T2"], use = "p"),
+   colorRampPalette(brewer.pal( 11,"PuOr" ))(100), cluster_rows = TRUE, cluster_cols = TRUE, 
+   breaks=c(-rev(brks),0,brks), na_col = "grey" , annotation_col = tumor )
+
+pheatmap( 
+   cor(pept17_msn_corr[ , mf_17$method=="T20"], use = "p"),
+   colorRampPalette(brewer.pal( 11,"PuOr" ))(100), cluster_rows = TRUE, cluster_cols = TRUE, 
+   breaks=c(-rev(brks),0,brks), na_col = "grey" , annotation_col = tumor )
+```
+
+find associated proteins to RELA gene and compare their expression 
+
+```{r}
+pept_rela <- peptides_17[peptides_17$`Gene names`=="RELA" | peptides_17$`Gene names`=="CDKN2A" | peptides_17$`Gene names`=="L1CAN", ]
+pept_rela[pept_rela==0] <- NA
+pept_rela <- pept_rela[rowSums(is.na(pept_rela[,116:149]))!=ncol(pept_rela[,116:149]),]
+id_rela <- pept_rela$id +1
+
+ord <- order( mf_17$tumor )
+
+pheatmap( 
+       pept17_corr[ id_rela, ord ],
+       colorRampPalette(brewer.pal( 11,"PuOr" ))(100), cluster_rows = FALSE, cluster_cols = FALSE,
+       na_col = "grey" , annotation_col = tumor, show_rownames = F)
+
+pheatmap( 
+       pept17_corr[ id_rela[ c( 5, 15, 17 ) ], ord ],
+       colorRampPalette(brewer.pal( 11,"PuOr" ))(100), cluster_rows = FALSE, cluster_cols = FALSE,
+       na_col = "grey" , annotation_col = tumor, show_rownames = F)
+```
+
+
+```{r}
+
+pept_nf2 <- peptides_17[peptides_17$`Gene names`=="NF2",]
+pept_nf2[pept_nf2==0] <- NA
+pept_nf2 <- pept_nf2[rowSums(is.na(pept_nf2[,116:149]))!=ncol(pept_nf2[,116:149]),]
+id_nf2 <- pept_nf2$id +1
+
+pheatmap( 
+       pept17_corr[ id_nf2, ord ],
+       colorRampPalette(brewer.pal( 11,"PuOr" ))(100), cluster_rows = FALSE, cluster_cols = FALSE,
+       na_col = "grey" , annotation_col = tumor, show_rownames = F)
+```
+
