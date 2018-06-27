@@ -22,6 +22,7 @@ the tumor subgroups were suggested in the paper:
 - `Notebook_17samples.nb` -- HTML Version of the R Notebook (17 samples)
 - `Sample_summary.pptx` -- PowerPoint Presentation with information about the naming and classification of the samples
 - `overview_project.pptx` -- PowerPoint Presentation with information about the tumor subgroups, processing of the samples...
+- `differing_peptides.txt` -- txt file containing the peptides that differ the most between the tumor subgroups
 
 The peptides tables (MaxQuant output) can be found on the bioinform5:
 - for 17 samples: /mnt/Data/Anders_group/u/annika/ZMBH/DKFZ-Krijgsveld/17samples
