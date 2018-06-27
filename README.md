@@ -23,6 +23,10 @@ the tumor subgroups were suggested in the paper:
 - `Sample_summary.pptx` -- PowerPoint Presentation with information about the naming and classification of the samples
 - `overview_project.pptx` -- PowerPoint Presentation with information about the tumor subgroups, processing of the samples...
 
+The peptides tables (MaxQuant output) can be found on the bioinform5:
+- for 17 samples: /mnt/Data/Anders_group/u/annika/ZMBH/DKFZ-Krijgsveld/17samples
+- for 83 samples: /mnt/Data/Anders_group/u/annika/ZMBH/DKFZ-Krijgsveld/83samples
+
 ![Number of samples per subgroup](images/EPNsubgroups.png)
 
 ![Subgroups 83 samples](images/subtype83samples.png)
